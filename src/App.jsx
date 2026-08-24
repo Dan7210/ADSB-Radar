@@ -21,7 +21,7 @@ const DEFAULT_CONFIG = {
   center: [-84.3880, 33.7490], // [Longitude, Latitude] - Default: Atlanta
   radiusStepNm: 2,
   source: 'both', // 'local', 'aggregator', or 'both'
-  localRefreshMs: 100,
+  localRefreshMs: 500,
   aggregatorRefreshMs: 15000,
   localUrl: 'https://adsb-radar.duckdns.org:8443/api/aircraft',
   hideStationary: true,
@@ -347,7 +347,7 @@ export function Radar({ cfg }) {
         const lon = cfg.center[0];
         const lat = cfg.center[1];
         const radius = 20 * cfg.radiusStepNm;
-        const aggregatorUrl = `https://api.adsb.lol/v2/point/${lat}/${lon}/${radius}`;
+        const aggregatorUrl = `https://adsb-radar.duckdns.org:8443/api/adsb-lol/${lat}/${lon}/${radius}`;
 
         const rows = await fetchAircraft(aggregatorUrl);
         if (!alive) return;
