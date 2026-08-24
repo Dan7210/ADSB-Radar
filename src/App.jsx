@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = {
   source: 'both', // 'local', 'aggregator', or 'both'
   localRefreshMs: 100,
   aggregatorRefreshMs: 15000,
-  localUrl: 'https://my-custom-adsb-pi.loca.lt/data/aircraft.json',
+  localUrl: 'https://adsb-radar.duckdns.org:8443/api/aircraft',
   hideStationary: true,
   staleTimeoutSecs: 30,
   highlightedTails: ['N885GT', 'N161GT', 'N314GT', 'N98714'],
@@ -66,6 +66,13 @@ function normalizeAircraft(raw, nowSecs) {
 }
 
 async function fetchAircraft(url) {
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const nowSecs = Date.now() / 1000;
+  return normalizeAircraft(await response.json(), nowSecs);
+}
+
+async function fetchLocalAircraft(url) {
   const response = await fetch(url, {
     cache: 'no-store',
     headers: {
@@ -301,7 +308,7 @@ export function Radar({ cfg }) {
 
     async function pollLocal() {
       try {
-        const rows = await fetchAircraft(cfg.localUrl);
+        const rows = await fetchLocalAircraft(cfg.localUrl);
         if (!alive) return;
 
         const map = new Map();

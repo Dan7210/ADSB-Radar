@@ -4,7 +4,7 @@
   "source": "both",
   "localRefreshMs": 100,
   "aggregatorRefreshMs": 15000,
-  "localUrl": "http://10.0.0.7:8080/data/aircraft.json",
+  "localUrl": "https://adsb-radar.duckdns.org:8443/api/aircraft",
   "hideStationary": true,
   "staleTimeoutSecs": 30,
   "highlightedTails": [
