@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = {
   source: 'both', // 'local', 'aggregator', or 'both'
   localRefreshMs: 100,
   aggregatorRefreshMs: 15000,
-  localUrl: 'http://73.82.215.130:8080/data/aircraft.json',
+  localUrl: 'https://my-custom-adsb-pi.loca.lt/data/aircraft.json',
   hideStationary: true,
   staleTimeoutSecs: 30,
   highlightedTails: ['N885GT', 'N161GT', 'N314GT', 'N98714'],
@@ -66,7 +66,12 @@ function normalizeAircraft(raw, nowSecs) {
 }
 
 async function fetchAircraft(url) {
-  const response = await fetch(url, {cache: 'no-store'});
+  const response = await fetch(url, {
+    cache: 'no-store',
+    headers: {
+      'Bypass-Tunnel-Reminder': 'true'
+    }
+  });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   const nowSecs = Date.now() / 1000;
   return normalizeAircraft(await response.json(), nowSecs);
@@ -335,7 +340,7 @@ export function Radar({ cfg }) {
         const lon = cfg.center[0];
         const lat = cfg.center[1];
         const radius = 20 * cfg.radiusStepNm;
-        const aggregatorUrl = `/api/adsb/v2/point/${lat}/${lon}/${radius}`;
+        const aggregatorUrl = `https://api.adsb.lol/v2/point/${lat}/${lon}/${radius}`;
 
         const rows = await fetchAircraft(aggregatorUrl);
         if (!alive) return;
