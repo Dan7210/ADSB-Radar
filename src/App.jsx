@@ -19,11 +19,11 @@ import './style.css';
 
 const DEFAULT_CONFIG = {
   center: [-84.3880, 33.7490], // [Longitude, Latitude] - Default: Atlanta
-  radiusStepNm: 20,
+  radiusStepNm: 2,
   source: 'both', // 'local', 'aggregator', or 'both'
   localRefreshMs: 100,
   aggregatorRefreshMs: 15000,
-  localUrl: 'http://10.0.0.7:8080/data/aircraft.json',
+  localUrl: 'http://73.82.215.130:8080/data/aircraft.json',
   hideStationary: true,
   staleTimeoutSecs: 30,
   highlightedTails: ['N885GT', 'N161GT', 'N314GT', 'N98714'],

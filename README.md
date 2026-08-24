@@ -69,7 +69,7 @@ To customize the radar for your exact location, aircraft watchlist, and local Pi
 ```json
 {
   "center": [-84.3880, 33.7490],
-  "radiusStepNm": 20,
+  "radiusStepNm": 2,
   "source": "both",
   "localRefreshMs": 100,
   "aggregatorRefreshMs": 15000,
