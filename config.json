@@ -2,7 +2,7 @@
   "center": [-84.3880, 33.7490],
   "radiusStepNm": 2,
   "source": "both",
-  "localRefreshMs": 100,
+  "localRefreshMs": 500,
   "aggregatorRefreshMs": 15000,
   "localUrl": "https://adsb-radar.duckdns.org:8443/api/aircraft",
   "hideStationary": true,
