@@ -51,24 +51,26 @@ const CATEGORY_MAP = {
 };
 
 function parseType(raw) {
-  // 1. Check server hex database lookup first
-  if (raw.aircraft_type) return String(raw.aircraft_type).trim();
+  if (raw.aircraft_type) {
+    const val = String(raw.aircraft_type).trim();
+    if (val && !/^(adsb|adsb_icao|icao|tis_b|nan|null|undefined|tisb_other)$/i.test(val)) {
+      return val;
+    }
+  }
 
-  // 2. Fall back to raw string fields if they are valid types
   const candidates = [raw.t, raw.desc, raw.type];
   for (const val of candidates) {
     if (!val || typeof val !== 'string') continue;
     const str = val.trim();
-    if (!str || /^(adsb|icao|tis_b|nan|null|undefined)$/i.test(str)) continue;
+    if (!str || /^(adsb|adsb_icao|icao|tis_b|nan|null|undefined|tisb_other)$/i.test(str)) continue;
     return str;
   }
 
-  // 3. Fall back to Mode S category code mapping (e.g. "A5" -> "Heavy Jet")
   if (raw.category && CATEGORY_MAP[raw.category]) {
     return CATEGORY_MAP[raw.category];
   }
 
-  return 'UNKNOWN';
+  return ''; // Return empty string so no type text renders
 }
 
 function normalizeAircraft(raw, nowSecs) {
@@ -85,15 +87,31 @@ function normalizeAircraft(raw, nowSecs) {
       (typeof a.dbFlags === 'number' && (a.dbFlags & 1) !== 0)
     );
 
+    // 1. Check Callsign -> 2. Check Tail/Registration -> 3. Fallback to Hex ICAO
+    const callsign = String(a.flight ?? a.callsign ?? '').trim();
+    const tailNumber = String(a.r ?? a.reg ?? a.tail ?? a.registration ?? '').trim();
+    const hex = String(a.hex || a.icao || a.icao24 || a.id || '').trim();
+
+    const displayIdent = callsign || tailNumber || hex || `${a.lat}:${a.lon}`;
+
+    // Standardize altitude numerical values vs ground text
+    let altVal = a.alt_baro ?? a.altitude ?? a.alt;
+    if (altVal === 'ground') {
+      altVal = 0;
+    } else {
+      altVal = Number(altVal);
+    }
+
     return {
-      id: String(a.hex || a.icao || a.icao24 || a.id || a.callsign || `${a.lat}:${a.lon}`),
+      id: String(hex || displayIdent),
       lat: Number(a.lat ?? a.latitude),
       lon: Number(a.lon ?? a.longitude),
       track: Number(a.track ?? a.heading ?? a.true_track ?? 0),
       gs: Number(a.gs ?? a.groundspeed ?? a.velocity ?? 0),
-      flight: String(a.flight ?? a.callsign ?? a.tail ?? '').trim(),
+      flight: displayIdent,
+      tail: tailNumber,
       type: parseType(a),
-      altitude: Number(a.alt_baro ?? a.altitude ?? a.alt ?? 0),
+      altitude: altVal,
       isMilitary,
       seen
     };
@@ -312,7 +330,8 @@ export function Radar({ cfg }) {
       const a = feature.get('aircraft');
       if (!a) return null;
 
-      const isHighlighted = highlighted.has((a.flight || '').toUpperCase());
+      const isHighlighted = highlighted.has((a.flight || '').toUpperCase()) || 
+                            highlighted.has((a.tail || '').toUpperCase());
 
       let color = cfg.normalColor;
       if (a.isLocal) {
@@ -327,6 +346,11 @@ export function Radar({ cfg }) {
 
       const position = feature.getGeometry().getCoordinates();
       const gs = a.gs || 0;
+
+      // Check for NaN, non-finite, or zero/ground altitude
+      const altStr = (Number.isNaN(a.altitude) || !Number.isFinite(a.altitude) || a.altitude === 0)
+        ? 'SFC'
+        : `${a.altitude.toLocaleString()} FT`;
 
       const styles = [
         new Style({
@@ -353,7 +377,7 @@ export function Radar({ cfg }) {
         ...(feature.get('hovered') || feature.get('selected') ? [new Style({
           geometry: new Point(position),
           text: new Text({
-            text: `${a.altitude.toLocaleString()} FT\n${a.type}`,
+            text: `${altStr}\n${a.type}`,
             offsetY: 28,
             font: '600 11px "JetBrains Mono", monospace',
             fill: new Fill({color}),
