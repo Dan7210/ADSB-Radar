@@ -37,6 +37,40 @@ const DEFAULT_CONFIG = {
 
 const NM_TO_M = 1852;
 
+const CATEGORY_MAP = {
+  'A1': 'Light Aircraft',
+  'A2': 'Small Aircraft',
+  'A3': 'Large Aircraft',
+  'A4': 'High-Vortex Heavy',
+  'A5': 'Heavy Jet',
+  'A6': 'High Performance',
+  'A7': 'Helicopter',
+  'B1': 'Glider',
+  'B2': 'Lighter-than-Air',
+  'B6': 'UAV / Drone'
+};
+
+function parseType(raw) {
+  // 1. Check server hex database lookup first
+  if (raw.aircraft_type) return String(raw.aircraft_type).trim();
+
+  // 2. Fall back to raw string fields if they are valid types
+  const candidates = [raw.t, raw.desc, raw.type];
+  for (const val of candidates) {
+    if (!val || typeof val !== 'string') continue;
+    const str = val.trim();
+    if (!str || /^(adsb|icao|tis_b|nan|null|undefined)$/i.test(str)) continue;
+    return str;
+  }
+
+  // 3. Fall back to Mode S category code mapping (e.g. "A5" -> "Heavy Jet")
+  if (raw.category && CATEGORY_MAP[raw.category]) {
+    return CATEGORY_MAP[raw.category];
+  }
+
+  return 'UNKNOWN';
+}
+
 function normalizeAircraft(raw, nowSecs) {
   const list = Array.isArray(raw) ? raw : (raw.aircraft || raw.ac || []);
   return list.map(a => {
@@ -58,7 +92,7 @@ function normalizeAircraft(raw, nowSecs) {
       track: Number(a.track ?? a.heading ?? a.true_track ?? 0),
       gs: Number(a.gs ?? a.groundspeed ?? a.velocity ?? 0),
       flight: String(a.flight ?? a.callsign ?? a.tail ?? '').trim(),
-      type: String(a.t ?? a.type ?? a.aircraft_type ?? a.desc ?? '').trim(),
+      type: parseType(a),
       altitude: Number(a.alt_baro ?? a.altitude ?? a.alt ?? 0),
       isMilitary,
       seen
@@ -94,6 +128,7 @@ export function Radar({ cfg }) {
   const aircraftLayerRef = useRef(null);
   const ringLayerRef = useRef(null);
   const hoveredFeatureRef = useRef(null);
+  const selectedFeatureRef = useRef(null);
 
   const [localAircraftMap, setLocalAircraftMap] = useState(new Map());
   const [aggregatorAircraftMap, setAggregatorAircraftMap] = useState(new Map());
@@ -176,10 +211,12 @@ export function Radar({ cfg }) {
     const map = mapRef.current;
     if (!map) return;
 
+    const getFeature = e => map.forEachFeatureAtPixel(e.pixel, f => {
+      if (f.get('aircraft')) return f;
+    }, {hitTolerance: 8});
+
     const handlePointerMove = e => {
-      const feature = map.forEachFeatureAtPixel(e.pixel, f => {
-        if (f.get('aircraft')) return f;
-      });
+      const feature = getFeature(e);
 
       if (hoveredFeatureRef.current !== feature) {
         if (hoveredFeatureRef.current) hoveredFeatureRef.current.set('hovered', false);
@@ -191,11 +228,26 @@ export function Radar({ cfg }) {
       map.getTargetElement().style.cursor = feature ? 'pointer' : '';
     };
 
+    const handleClick = e => {
+      const feature = getFeature(e);
+
+      if (selectedFeatureRef.current && selectedFeatureRef.current !== feature)
+        selectedFeatureRef.current.set('selected', false);
+
+      selectedFeatureRef.current = feature || null;
+      if (feature) feature.set('selected', true);
+
+      map.render();
+    };
+
     map.on('pointermove', handlePointerMove);
+    map.on('singleclick', handleClick);
 
     return () => {
       map.un('pointermove', handlePointerMove);
+      map.un('singleclick', handleClick);
       hoveredFeatureRef.current = null;
+      selectedFeatureRef.current = null;
     };
   }, []);
 
@@ -298,10 +350,10 @@ export function Radar({ cfg }) {
             })
           })
         }),
-        ...(feature.get('hovered') && a.type ? [new Style({
+        ...(feature.get('hovered') || feature.get('selected') ? [new Style({
           geometry: new Point(position),
           text: new Text({
-            text: `${a.type}\n${a.altitude.toLocaleString()} FT`,
+            text: `${a.altitude.toLocaleString()} FT\n${a.type}`,
             offsetY: 28,
             font: '600 11px "JetBrains Mono", monospace',
             fill: new Fill({color}),
@@ -313,7 +365,6 @@ export function Radar({ cfg }) {
         })] : [])
       ];
 
-      // 25 kts used to determine if aircraft is "moving" or not
       if (gs > 25) {
         const track = Number.isFinite(a.track) ? a.track : 0;
         const angle = track * Math.PI / 180;
