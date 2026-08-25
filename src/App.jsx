@@ -58,6 +58,7 @@ function normalizeAircraft(raw, nowSecs) {
       track: Number(a.track ?? a.heading ?? a.true_track ?? 0),
       gs: Number(a.gs ?? a.groundspeed ?? a.velocity ?? 0),
       flight: String(a.flight ?? a.callsign ?? a.tail ?? '').trim(),
+      type: String(a.t ?? a.type ?? a.aircraft_type ?? a.desc ?? '').trim(),
       altitude: Number(a.alt_baro ?? a.altitude ?? a.alt ?? 0),
       isMilitary,
       seen
@@ -92,6 +93,7 @@ export function Radar({ cfg }) {
   const aircraftFeaturesRef = useRef(new Map()); 
   const aircraftLayerRef = useRef(null);
   const ringLayerRef = useRef(null);
+  const hoveredFeatureRef = useRef(null);
 
   const [localAircraftMap, setLocalAircraftMap] = useState(new Map());
   const [aggregatorAircraftMap, setAggregatorAircraftMap] = useState(new Map());
@@ -169,6 +171,33 @@ export function Radar({ cfg }) {
       ringSourceRef.current.clear();
     };
   }, [cfg.center]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const handlePointerMove = e => {
+      const feature = map.forEachFeatureAtPixel(e.pixel, f => {
+        if (f.get('aircraft')) return f;
+      });
+
+      if (hoveredFeatureRef.current !== feature) {
+        if (hoveredFeatureRef.current) hoveredFeatureRef.current.set('hovered', false);
+        hoveredFeatureRef.current = feature || null;
+        if (feature) feature.set('hovered', true);
+        map.render();
+      }
+
+      map.getTargetElement().style.cursor = feature ? 'pointer' : '';
+    };
+
+    map.on('pointermove', handlePointerMove);
+
+    return () => {
+      map.un('pointermove', handlePointerMove);
+      hoveredFeatureRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -268,7 +297,20 @@ export function Radar({ cfg }) {
               width: 3
             })
           })
-        })
+        }),
+        ...(feature.get('hovered') && a.type ? [new Style({
+          geometry: new Point(position),
+          text: new Text({
+            text: `${a.type}\n${a.altitude.toLocaleString()} FT`,
+            offsetY: 28,
+            font: '600 11px "JetBrains Mono", monospace',
+            fill: new Fill({color}),
+            stroke: new Stroke({
+              color: 'rgba(0,0,0,.75)',
+              width: 3
+            })
+          })
+        })] : [])
       ];
 
       // 25 kts used to determine if aircraft is "moving" or not
