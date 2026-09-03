@@ -44,8 +44,8 @@ A real-time, customizable ADS-B air traffic radar display built with React, Open
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/adsb-radar-view.git
-   cd adsb-radar-view
+   git clone https://github.com/Dan7210/ADSB-Radar.git
+   cd adsb-radar
    ```
 
 2. **Install dependencies:**
