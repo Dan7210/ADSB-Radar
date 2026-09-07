@@ -9,6 +9,36 @@ const app = express();
 const PORT = 8443;
 const FILE_PATH = '/run/adsb-feeder-ultrafeeder/readsb/aircraft.json';
 
+// Atlanta, GA (Center) - 100 Nautical Miles Radius
+const ATLANTA_LAT = '33.7490';
+const ATLANTA_LON = '-84.3880';
+const RADIUS_NMI = '100';
+const TARGET_URL = `https://api.adsb.lol/v2/point/${ATLANTA_LAT}/${ATLANTA_LON}/${RADIUS_NMI}`;
+
+const POLL_INTERVAL_MS = 15000;
+let cachedAdsbData = null;
+let lastFetchError = null;
+
+// Background Poller
+async function pollAdsbLol() {
+  try {
+    const response = await fetch(TARGET_URL);
+    if (!response.ok) {
+      throw new Error(`Upstream returned status ${response.status}`);
+    }
+    cachedAdsbData = await response.json();
+    lastFetchError = null;
+    console.log(`[adsb.lol] Successfully updated cache for Atlanta, GA (100 nmi radius)`);
+  } catch (err) {
+    console.error(`[adsb.lol] Poll failed: ${err.message}`);
+    lastFetchError = err.message;
+  }
+}
+
+// Start polling
+pollAdsbLol();
+setInterval(pollAdsbLol, POLL_INTERVAL_MS);
+
 // Enable CORS
 app.use(cors());
 app.use(morgan('combined'));
@@ -43,29 +73,24 @@ app.get('/api/aircraft', clientLimiter, (req, res) => {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.json(parsedData);
-    } catch (parseErr) {
+    } catch {
       res.status(500).json({ error: 'Failed to parse aircraft JSON stream' });
     }
   });
 });
 
-// Proxy endpoint for adsb.lol requests
-app.get('/api/adsb-lol/:lat/:lon/:radius', clientLimiter, async (req, res) => {
-  const { lat, lon, radius } = req.params;
-  const targetUrl = `https://api.adsb.lol/v2/point/${lat}/${lon}/${radius}`;
-
-  try {
-    const response = await fetch(targetUrl);
-    if (!response.ok) {
-      return res.status(response.status).json({ error: 'adsb.lol upstream error' });
-    }
-    const data = await response.json();
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', 'no-store');
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch from adsb.lol' });
+// Serve cached Atlanta adsb.lol data directly
+app.get('/api/adsb-lol', clientLimiter, (req, res) => {
+  if (!cachedAdsbData) {
+    return res.status(503).json({
+      error: 'adsb.lol cache warming up',
+      details: lastFetchError || 'Waiting for initial poll completion.'
+    });
   }
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(cachedAdsbData);
 });
 
 const sslOptions = {
