@@ -26,7 +26,7 @@ const DEFAULT_CONFIG = {
   localUrl: 'https://adsb-radar.duckdns.org:8443/api/aircraft',
   hideStationary: true,
   staleTimeoutSecs: 30,
-  highlightedTails: ['N885GT', 'N161GT', 'N314GT', 'N98714'],
+  highlightedTails: ['N885GT', 'N161GT', 'N314GT', 'N98714', 'N2247T'],
   normalColor: '#d9e7ff',     // Aggregator-only aircraft color
   localColor: '#33ccff',      // Local Pi / Both aircraft color (Blue)
   highlightColor: '#ffb84d',  // Highlighted tail color (Gold)
