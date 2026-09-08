@@ -463,10 +463,8 @@ export function Radar({ cfg }) {
 
     async function pollAggregator() {
       try {
-        const lon = -84.30226;
-        const lat = 33.87623;
-        const radius = 20 * cfg.radiusStepNm;
-        const aggregatorUrl = `https://adsb-radar.duckdns.org:8443/api/adsb-lol/${lat}/${lon}/${radius}`;
+        //Aggregator is hard-coded to poll 100 nmi around Atlanta.
+        const aggregatorUrl = `https://adsb-radar.duckdns.org:8443/api/adsb-lol`;
 
         const rows = await fetchAircraft(aggregatorUrl);
         if (!alive) return;
