@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+backend/airport-visits.json
+backend/airport-visits.json.*.tmp
+backend/airport-visit-state.json
+backend/airport-visit-state.json.*.tmp
 
 # Editor directories and files
 .vscode/*
