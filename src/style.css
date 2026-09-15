@@ -71,7 +71,7 @@ body { overflow: hidden; }
 
 .destinations-subtitle { margin-top: 7px; font-size: 10px; opacity: .7; }
 .destinations-summary { font-size: 11px; text-align: right; }
-.destinations-summary strong { display: block; font-size: 25px; color: #ffbd52; }
+.destinations-summary strong { display: block; font-size: 20px; color: #ffbd52; }
 .destinations-legend, .destinations-detail {
   position: fixed; z-index: 5;
   background: rgba(3, 9, 18, .88);

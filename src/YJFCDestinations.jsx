@@ -232,7 +232,7 @@ export default function YJFCDestinations() {
           <div className="title">From KPDK</div>
         </div>
         <div className="destinations-summary">
-          <strong>{visits.length}</strong> airports recorded
+          <strong>{visits.length}</strong> airports visited
         </div>
       </header>
 

@@ -46,7 +46,9 @@ function loadAirports(filePath = AIRPORTS_PATH) {
   const [header, ...rows] = parseCsv(fs.readFileSync(filePath, 'utf8'));
   if (!header) throw new Error('airports.csv is empty');
   const columns = Object.fromEntries(header.map((name, index) => [name.replace(/^\uFEFF/, '').trim(), index]));
-  for (const name of ['Site Id', 'ICAO Id', 'ARP Latitude DD', 'ARP Longitude DD']) {
+  
+  // Site Id and coordinates remain required; ICAO Id and Loc Id are handled as fallbacks if present
+  for (const name of ['Site Id', 'ARP Latitude DD', 'ARP Longitude DD']) {
     if (columns[name] === undefined) throw new Error(`airports.csv is missing ${name}`);
   }
 
@@ -55,12 +57,19 @@ function loadAirports(filePath = AIRPORTS_PATH) {
     const longitude = row[columns['ARP Longitude DD']]?.trim();
     const lat = Number(latitude);
     const lon = Number(longitude);
-    const siteId = row[columns['Site Id']]?.trim();
+
+    const icaoId = columns['ICAO Id'] !== undefined ? row[columns['ICAO Id']]?.trim() : null;
+    const locId = columns['Loc Id'] !== undefined ? row[columns['Loc Id']]?.trim() : null;
+    const baseSiteId = row[columns['Site Id']]?.trim();
+
+    // Fallback order: Icao Id -> Loc Id -> Site Id
+    const siteId = icaoId || locId || baseSiteId;
+
     if (!siteId || !latitude || !longitude || !Number.isFinite(lat) || !Number.isFinite(lon) ||
         Math.abs(lat) > 90 || Math.abs(lon) > 180) return [];
     return [{
       siteId,
-      icao: row[columns['ICAO Id']]?.trim() || null,
+      icao: icaoId || null,
       lat,
       lon,
     }];
