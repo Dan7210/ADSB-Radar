@@ -4,7 +4,7 @@ const path = require('path');
 const AIRPORTS_PATH = path.join(__dirname, 'airports.csv');
 const VISITS_PATH = path.join(__dirname, 'airport-visits.json');
 const STATE_PATH = path.join(__dirname, 'airport-visit-state.json');
-const VISIT_RADIUS_NM = 5;
+const VISIT_RADIUS_NM = 3;
 const REVISIT_COOLDOWN_MS = 30 * 60 * 1000;
 const EARTH_RADIUS_NM = 3440.065;
 

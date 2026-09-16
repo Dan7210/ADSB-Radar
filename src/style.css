@@ -72,7 +72,7 @@ body { overflow: hidden; }
 .destinations-subtitle { margin-top: 7px; font-size: 10px; opacity: .7; }
 .destinations-summary { font-size: 11px; text-align: right; }
 .destinations-summary strong { display: block; font-size: 20px; color: #ffbd52; }
-.destinations-legend, .destinations-detail {
+.destinations-legend, .destinations-tooltip {
   position: fixed; z-index: 5;
   background: rgba(3, 9, 18, .88);
   border: 1px solid rgba(200, 220, 245, .2);
@@ -86,12 +86,28 @@ body { overflow: hidden; }
 .legend-line.recent { border-color: #ffbd52; }
 .legend-line.older { border-color: rgba(255, 255, 255, .5); border-top-style: dashed; }
 .legend-note { margin-top: 3px; opacity: .65; }
-.destinations-detail { right: 28px; bottom: 54px; min-width: 155px; display: flex; flex-direction: column; }
-.destinations-detail strong { color: #ffbd52; font-size: 13px; }
+.destinations-tooltip { width: 220px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; gap: 3px; border-radius: 10px; pointer-events: none; background: rgba(7, 17, 31, .97); border-color: rgba(255, 189, 82, .3); }
+.destinations-tooltip strong { color: #ffbd52; font-size: 13px; }
 .destinations-footer { justify-content: space-between; }
 @media (max-width: 600px) {
   .destinations-hud { top: 16px; left: 16px; right: 16px; }
   .destinations-legend { left: 16px; bottom: 65px; }
-  .destinations-detail { right: 16px; bottom: 65px; }
   .destinations-footer { left: 16px; right: 16px; flex-wrap: wrap; }
+}
+
+.destinations-tooltip span { color: #b9c9df; }
+.destinations .ol-zoom {
+  display: block; top: 94px; left: 28px; padding: 4px;
+  border: 1px solid rgba(200, 220, 245, .2); border-radius: 8px;
+  background: rgba(7, 17, 31, .94);
+}
+.destinations .ol-zoom button {
+  width: 32px; height: 32px; color: #d9e7ff; background: #102137;
+  cursor: pointer;
+}
+.destinations .ol-zoom button:hover, .destinations .ol-zoom button:focus-visible {
+  color: #ffbd52; background: #203550;
+}
+@media (max-width: 600px) {
+  .destinations .ol-zoom { left: 16px; }
 }

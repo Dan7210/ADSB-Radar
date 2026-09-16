@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import OLMap from 'ol/Map.js';
 import View from 'ol/View.js';
+import Zoom from 'ol/control/Zoom.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import VectorSource from 'ol/source/Vector.js';
 import Feature from 'ol/Feature.js';
@@ -18,7 +19,7 @@ import './style.css';
 
 const HOME = { icao: 'KPDK', lat: 33.8760019, lon: -84.3020306 };
 const API_URL = 'https://adsb-radar.duckdns.org:8443/api/airport-visits';
-const RADIUS_NM = 152;
+const RADIUS_NM = 50;
 const EARTH_RADIUS_NM = 3440.065;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const GOLD = '#ffbd52';
@@ -75,19 +76,11 @@ export default function YJFCDestinations() {
   const dotsRef = useRef(new VectorSource());
   const [visits, setVisits] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0 });
   const [error, setError] = useState('');
 
   useEffect(() => {
     const boundary = radiusBoundary();
-    const boundarySource = new VectorSource({
-      features: [new Feature({ geometry: boundary })],
-    });
-    const boundaryLayer = new VectorLayer({
-      source: boundarySource,
-      style: new Style({
-        stroke: new Stroke({ color: 'rgba(255,189,82,0.38)', width: 1, lineDash: [4, 8] }),
-      }),
-    });
     const lineLayer = new VectorLayer({
       source: linesRef.current,
       style: (feature) => new Style({
@@ -123,43 +116,52 @@ export default function YJFCDestinations() {
     const map = new OLMap({
       target: mapElement.current,
       view: new View({ center: fromLonLat([HOME.lon, HOME.lat]), zoom: 7 }),
-      controls: [],
-      interactions: [],
+      controls: [new Zoom()],
     });
     mapRef.current = map;
 
-    const fitRadius = () => {
-      map.updateSize();
-      map.getView().fit(boundary.getExtent(), { padding: [75, 75, 75, 75], duration: 0 });
-    };
+    // Set the initial 50 nmi range once, preserving user zoom on resize.
+    map.getView().fit(boundary.getExtent(), { padding: [75, 75, 75, 75], duration: 0 });
+    let active = true;
     apply(map, 'https://tiles.openfreemap.org/styles/dark')
       .then(() => {
-        map.addLayer(boundaryLayer);
+        if (!active) return;
         map.addLayer(lineLayer);
         map.addLayer(dotLayer);
-        fitRadius();
       })
-      .catch(() => setError('Could not load the map background.'));
+      .catch(() => {
+        if (active) setError('Could not load the map background.');
+      });
 
-    const handleClick = (event) => {
-      const feature = map.forEachFeatureAtPixel(event.pixel,
-        (candidate) => candidate.get('visit') ? candidate : undefined,
-        { hitTolerance: 8 });
-      setSelected(feature?.get('visit') || null);
+    const clearHover = () => {
+      setSelected(null);
+      map.getTargetElement().style.cursor = '';
     };
     const handlePointerMove = (event) => {
+      if (event.dragging) {
+        clearHover();
+        return;
+      }
       const feature = map.forEachFeatureAtPixel(event.pixel,
         (candidate) => candidate.get('visit') ? candidate : undefined,
-        { hitTolerance: 8 });
+        { hitTolerance: 8, layerFilter: (layer) => layer === dotLayer });
       map.getTargetElement().style.cursor = feature ? 'pointer' : '';
+      setSelected(feature?.get('visit') || null);
+      const [width, height] = map.getSize();
+      setTooltipPosition({
+        left: Math.max(8, Math.min(event.pixel[0] + 16, width - 228)),
+        top: Math.max(8, Math.min(event.pixel[1] + 16, height - 112)),
+      });
     };
-    map.on('singleclick', handleClick);
     map.on('pointermove', handlePointerMove);
-    window.addEventListener('resize', fitRadius);
+    map.on('movestart', clearHover);
+    const viewport = map.getViewport();
+    viewport.addEventListener('pointerleave', clearHover);
 
     return () => {
-      window.removeEventListener('resize', fitRadius);
-      map.un('singleclick', handleClick);
+      active = false;
+      viewport.removeEventListener('pointerleave', clearHover);
+      map.un('movestart', clearHover);
       map.un('pointermove', handlePointerMove);
       map.setTarget(undefined);
       mapRef.current = null;
@@ -225,7 +227,7 @@ export default function YJFCDestinations() {
 
   return (
     <main className="radar destinations">
-      <div ref={mapElement} className="map" />
+      <div ref={mapElement} className="map" tabIndex={0} aria-label="Airport destinations map. Use plus and minus to zoom." />
       <header className="hud destinations-hud">
         <div>
           <div className="eyebrow">YJFC DESTINATIONS</div>
@@ -241,7 +243,7 @@ export default function YJFCDestinations() {
         <div><span className="legend-line older" /> Earlier visits</div>
       </aside>
 
-      {selected && <aside className="destinations-detail">
+      {selected && <aside className="destinations-tooltip" role="tooltip" style={tooltipPosition}>
         <strong>{selected.icao || selected.siteId || 'Airport'}</strong>
         <span>{selected.visitCount ? `${selected.visitCount} ${selected.visitCount === 1 ? 'visit' : 'visits'}` : 'Home base'}</span>
         {selected.lastVisitedAt && <span>Last seen {formatVisitDate(selected.lastVisitedAt)}</span>}
