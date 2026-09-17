@@ -245,7 +245,7 @@ export default function YJFCDestinations() {
 
       {selected && <aside className="destinations-tooltip" role="tooltip" style={tooltipPosition}>
         <strong>{selected.icao || selected.siteId || 'Airport'}</strong>
-        <span>{selected.visitCount ? `${selected.visitCount} ${selected.visitCount === 1 ? 'visit' : 'visits'}` : 'Home base'}</span>
+        <span>{selected.icao?.toUpperCase() === HOME.icao ? 'Home base' : `${selected.visitCount} ${selected.visitCount === 1 ? 'visit' : 'visits'}`}</span>
         {selected.lastVisitedAt && <span>Last seen {formatVisitDate(selected.lastVisitedAt)}</span>}
       </aside>}
 
