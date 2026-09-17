@@ -4,8 +4,8 @@ const path = require('path');
 const AIRPORTS_PATH = path.join(__dirname, 'airports.csv');
 const VISITS_PATH = path.join(__dirname, 'airport-visits.json');
 const STATE_PATH = path.join(__dirname, 'airport-visit-state.json');
-const VISIT_RADIUS_NM = 3;
-const REVISIT_COOLDOWN_MS = 30 * 60 * 1000;
+const VISIT_RADIUS_NM = 2; // 2 nmi seems reasonable before ADSB cuts out
+const REVISIT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes also seems reasonable
 const EARTH_RADIUS_NM = 3440.065;
 
 function parseCsv(text) {
@@ -47,12 +47,15 @@ function loadAirports(filePath = AIRPORTS_PATH) {
   if (!header) throw new Error('airports.csv is empty');
   const columns = Object.fromEntries(header.map((name, index) => [name.replace(/^\uFEFF/, '').trim(), index]));
   
-  // Site Id and coordinates remain required; ICAO Id and Loc Id are handled as fallbacks if present
-  for (const name of ['Site Id', 'ARP Latitude DD', 'ARP Longitude DD']) {
+  for (const name of ['Site Id', 'ARP Latitude DD', 'ARP Longitude DD', 'Facility Type', 'Use']) {
     if (columns[name] === undefined) throw new Error(`airports.csv is missing ${name}`);
   }
 
   return rows.flatMap((row) => {
+    const facilityType = row[columns['Facility Type']]?.trim();
+    const use = row[columns['Use']]?.trim();
+    if (facilityType !== 'AIRPORT' || use !== 'PU') return [];
+
     const latitude = row[columns['ARP Latitude DD']]?.trim();
     const longitude = row[columns['ARP Longitude DD']]?.trim();
     const lat = Number(latitude);
