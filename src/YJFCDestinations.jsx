@@ -234,7 +234,7 @@ export default function YJFCDestinations() {
           <div className="title">From KPDK</div>
         </div>
         <div className="destinations-summary">
-          <strong>{visits.length}</strong> airports visited
+          <strong>{Math.max(0,visits.length - 1)}</strong> airports visited
         </div>
       </header>
 
