@@ -130,3 +130,19 @@ The component expects a CSS file (`style.css`) providing dark HUD radar layout s
 ## License
 
 MIT License - feel free to use and adapt this project for personal feeder radar displays.
+
+## Automatic YJFC map
+
+The `#/YJFC` route reuses the destinations map and selects its view automatically:
+
+- No fresh YJFC positions: fixed CONUS view with recorded airport visits, route lines, and visit tooltips.
+- Strict majority within 5 nautical miles of KPDK: fixed KPDK view with a 5 nmi outer ring and only YJFC aircraft.
+- Otherwise (including ties): follows each active YJFC registration for 15 seconds with a 10 nmi outer ring. The camera follows position updates and adjusts to window resizing.
+
+“Active” means a valid ADS-B position no older than 30 seconds, including slow or stationary aircraft. Staleness includes elapsed time since the backend poll, so failed requests cannot leave aircraft visible indefinitely. Feed errors are shown separately from the destinations view.
+
+The frontend uses `/api/yjfc-aircraft`. Deploy/restart the updated backend alongside the frontend. The backend queries only the five registrations globally every 15 seconds and reuses those results for airport-visit tracking. The existing general radar retains `/api/adsb-lol`; area polling runs only while that endpoint has recent clients. YJFC no longer downloads the full local or area feed.
+
+The `#/YJFC` route always uses live data; simulation controls and URL overrides are disabled.
+
+Run the focused regression tests with `node --test src/yjfcTracking.test.js backend/yjfcFeed.test.cjs`.

@@ -20,7 +20,6 @@ const RADIUS_NMI = '100';
 const TARGET_URL = `https://api.adsb.lol/v2/point/${ATLANTA_LAT}/${ATLANTA_LON}/${RADIUS_NMI}`;
 
 const POLL_INTERVAL_MS = 15000;
-const VISIT_POLL_INTERVAL_MS = 60000;
 const TRACKED_TAILS = ['N885GT', 'N161GT', 'N314GT', 'N98714', 'N2247T'];
 const airports = loadAirports();
 let airportVisits = loadVisits();
@@ -29,11 +28,17 @@ let visitStateDirty = false;
 let visitPollInProgress = false;
 let cachedAdsbData = null;
 let lastFetchError = null;
+let cachedYjfcData = null;
+let yjfcPollInProgress = false;
+let areaPollInProgress = false;
+let lastAreaRequestAt = 0;
 
 // Background Poller
 async function pollAdsbLol() {
+  if (areaPollInProgress || Date.now() - lastAreaRequestAt > 60000) return;
+  areaPollInProgress = true;
   try {
-    const response = await fetch(TARGET_URL);
+    const response = await fetch(TARGET_URL, { signal: AbortSignal.timeout(12000) });
     if (!response.ok) {
       throw new Error(`Upstream returned status ${response.status}`);
     }
@@ -43,11 +48,12 @@ async function pollAdsbLol() {
   } catch (err) {
     console.error(`[adsb.lol] Poll failed: ${err.message}`);
     lastFetchError = err.message;
+  } finally {
+    areaPollInProgress = false;
   }
 }
 
 // Start polling
-pollAdsbLol();
 setInterval(pollAdsbLol, POLL_INTERVAL_MS);
 
 // Query registrations globally; the Atlanta point feed cannot see visits elsewhere.
@@ -61,20 +67,10 @@ function sameVisitState(left, right) {
   return true;
 }
 
-async function pollAirportVisits() {
+async function pollAirportVisits(results) {
   if (visitPollInProgress) return;
   visitPollInProgress = true;
   try {
-    const results = await Promise.allSettled(TRACKED_TAILS.map(async (tail) => {
-      const response = await fetch(`https://api.adsb.lol/v2/reg/${tail}`, {
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!response.ok) throw new Error(`${tail}: upstream returned ${response.status}`);
-      const data = await response.json();
-      if (!Array.isArray(data.ac)) throw new Error(`${tail}: upstream returned invalid aircraft data`);
-      return { tail, aircraft: data.ac };
-    }));
-
     let updatedVisits = airportVisits;
     let changes = 0;
     const nextActiveIds = new Map(activeAirportIdsByTail);
@@ -127,8 +123,34 @@ async function pollAirportVisits() {
   }
 }
 
-pollAirportVisits();
-setInterval(pollAirportVisits, VISIT_POLL_INTERVAL_MS);
+// One global registration lookup per tail per cycle, shared by the map and visit tracking.
+async function pollYjfc() {
+  if (yjfcPollInProgress) return;
+  yjfcPollInProgress = true;
+  const fetchedAt = new Date().toISOString();
+  try {
+    const results = await Promise.allSettled(TRACKED_TAILS.map(async tail => {
+      const response = await fetch(`https://api.adsb.lol/v2/reg/${tail}`, {
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) throw new Error(`${tail}: upstream returned ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data.ac)) throw new Error(`${tail}: invalid aircraft data`);
+      return { tail, aircraft: data.ac.filter(a => !a.r || String(a.r).trim().toUpperCase() === tail)
+        .map(a => ({ ...a, r: tail })) };
+    }));
+    // Failed lookups are omitted, never re-stamped as fresh aircraft.
+    cachedYjfcData = { fetchedAt,
+      ac: results.flatMap(result => result.status === 'fulfilled' ? result.value.aircraft : []),
+      errors: results.filter(result => result.status === 'rejected').map(result => result.reason.message),
+    };
+    await pollAirportVisits(results);
+  } finally {
+    yjfcPollInProgress = false;
+  }
+}
+pollYjfc();
+setInterval(pollYjfc, POLL_INTERVAL_MS);
 
 // Enable CORS
 app.use(cors());
@@ -172,6 +194,9 @@ app.get('/api/aircraft', clientLimiter, (req, res) => {
 
 // Serve cached Atlanta adsb.lol data directly
 app.get('/api/adsb-lol', clientLimiter, (req, res) => {
+  // The general radar still needs an area feed. YJFC-only use never starts it.
+  lastAreaRequestAt = Date.now();
+  if (!cachedAdsbData) void pollAdsbLol();
   if (!cachedAdsbData) {
     return res.status(503).json({
       error: 'adsb.lol cache warming up',
@@ -182,6 +207,15 @@ app.get('/api/adsb-lol', clientLimiter, (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Cache-Control', 'no-store');
   res.json(cachedAdsbData);
+});
+
+app.get('/api/yjfc-aircraft', clientLimiter, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!cachedYjfcData) return res.status(503).json({ error: 'YJFC cache warming up' });
+  if (cachedYjfcData.errors.length === TRACKED_TAILS.length) {
+    return res.status(503).json({ error: 'All YJFC lookups failed' });
+  }
+  res.json(cachedYjfcData);
 });
 
 app.get('/api/airport-visits', clientLimiter, (req, res) => {

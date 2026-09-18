@@ -7,7 +7,9 @@ import VectorSource from 'ol/source/Vector.js';
 import Feature from 'ol/Feature.js';
 import Point from 'ol/geom/Point.js';
 import LineString from 'ol/geom/LineString.js';
-import { fromLonLat } from 'ol/proj.js';
+import { fromLonLat, transformExtent } from 'ol/proj.js';
+import { offset } from 'ol/sphere.js';
+import { NM } from './yjfcTracking.js';
 import Style from 'ol/style/Style.js';
 import Stroke from 'ol/style/Stroke.js';
 import Fill from 'ol/style/Fill.js';
@@ -25,10 +27,10 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const GOLD = '#ffbd52';
 const OLD_COLOR = 'rgba(255,255,255,0.5)';
 
-function radiusBoundary() {
-  const latitude = HOME.lat * Math.PI / 180;
-  const longitude = HOME.lon * Math.PI / 180;
-  const distance = RADIUS_NM / EARTH_RADIUS_NM;
+function radiusBoundary(center = HOME, radius = RADIUS_NM) {
+  const latitude = center.lat * Math.PI / 180;
+  const longitude = center.lon * Math.PI / 180;
+  const distance = radius / EARTH_RADIUS_NM;
   const coordinates = [];
   for (let degrees = 0; degrees <= 360; degrees += 5) {
     const bearing = degrees * Math.PI / 180;
@@ -69,7 +71,12 @@ function formatVisitDate(value) {
   return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleDateString();
 }
 
-export default function YJFCDestinations() {
+export default function YJFCDestinations({ tracking }) {
+  const mode = tracking?.mode || 'destinations';
+  const isTracking = Boolean(tracking);
+  const aircraftSource = useRef(new VectorSource());
+  const ringsSource = useRef(new VectorSource());
+  const layersRef = useRef(null);
   const mapElement = useRef(null);
   const mapRef = useRef(null);
   const linesRef = useRef(new VectorSource());
@@ -113,10 +120,29 @@ export default function YJFCDestinations() {
       },
     });
 
+    const ringLayer = new VectorLayer({ source: ringsSource.current, style: new Style({
+      stroke: new Stroke({ color: 'rgba(135,180,255,.38)', width: 1 }),
+    }) });
+    const aircraftLayer = new VectorLayer({ source: aircraftSource.current, style: feature => {
+      const a = feature.get('aircraft');
+      const point = [a.lon, a.lat];
+      const behind = offset(point, Math.max(0.2, Number(a.gs || 0) / 120) * NM,
+        (Number(a.track || 0) + 180) * Math.PI / 180);
+      return [new Style({
+        image: new CircleStyle({ radius: 5, fill: new Fill({ color: GOLD }),
+          stroke: new Stroke({ color: '#07111f', width: 2 }) }),
+        text: new Text({ text: `${a.r}\n${a.alt_baro === 'ground' ? 'SFC' : a.alt_baro != null ? a.alt_baro + ' FT' : 'ALT —'} · ${a.gs ?? '—'} KT`,
+          offsetY: -25, font: '600 11px "JetBrains Mono", monospace',
+          fill: new Fill({ color: GOLD }), stroke: new Stroke({ color: '#07111f', width: 3 }) }),
+      }), new Style({ geometry: new LineString([fromLonLat(behind), fromLonLat(point)]),
+        stroke: new Stroke({ color: GOLD, width: 1.5, lineDash: [2, 7] }) })];
+    } });
+    layersRef.current = { lineLayer, dotLayer, ringLayer, aircraftLayer };
     const map = new OLMap({
       target: mapElement.current,
       view: new View({ center: fromLonLat([HOME.lon, HOME.lat]), zoom: 7 }),
-      controls: [new Zoom()],
+      controls: isTracking ? [] : [new Zoom()],
+      ...(isTracking ? { interactions: [] } : {}),
     });
     mapRef.current = map;
 
@@ -128,6 +154,8 @@ export default function YJFCDestinations() {
         if (!active) return;
         map.addLayer(lineLayer);
         map.addLayer(dotLayer);
+        map.addLayer(ringLayer);
+        map.addLayer(aircraftLayer);
       })
       .catch(() => {
         if (active) setError('Could not load the map background.');
@@ -166,7 +194,7 @@ export default function YJFCDestinations() {
       map.setTarget(undefined);
       mapRef.current = null;
     };
-  }, []);
+  }, [isTracking]);
 
   useEffect(() => {
     let active = true;
@@ -225,25 +253,64 @@ export default function YJFCDestinations() {
     mapRef.current?.render();
   }, [visits]);
 
+  const focusLon = mode === 'follow' ? tracking?.focus?.lon : undefined;
+  const focusLat = mode === 'follow' ? tracking?.focus?.lat : undefined;
+  useEffect(() => {
+    if (!isTracking || !mapRef.current) return;
+    const map = mapRef.current;
+    const { lineLayer, dotLayer, ringLayer, aircraftLayer } = layersRef.current;
+    const idle = mode === 'destinations';
+    lineLayer.setVisible(idle);
+    dotLayer.setVisible(idle);
+    ringLayer.setVisible(!idle);
+    aircraftLayer.setVisible(!idle);
+    const center = mode === 'follow' ? { lon: focusLon, lat: focusLat } : HOME;
+    const radius = mode === 'follow' ? 10 : 5;
+    const extent = idle ? transformExtent([-125, 24, -66, 50], 'EPSG:4326', 'EPSG:3857')
+      : radiusBoundary(center, radius).getExtent();
+    ringsSource.current.clear(true);
+    if (!idle) ringsSource.current.addFeatures(Array.from({ length: 5 }, (_, index) =>
+      new Feature({ geometry: radiusBoundary(center, radius * (index + 1) / 5) })));
+    const fit = () => {
+      map.updateSize();
+      map.getView().fit(extent, { padding: [80, 35, 80, 35], duration: 0 });
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(mapElement.current);
+    return () => observer.disconnect();
+  }, [isTracking, mode, focusLon, focusLat]);
+
+  useEffect(() => {
+    aircraftSource.current.clear(true);
+    aircraftSource.current.addFeatures((tracking?.aircraft || []).map(a =>
+      new Feature({ geometry: new Point(fromLonLat([a.lon, a.lat])), aircraft: a })));
+  }, [tracking?.aircraft]);
+
   return (
     <main className="radar destinations">
-      <div ref={mapElement} className="map" tabIndex={0} aria-label="Airport destinations map. Use plus and minus to zoom." />
+      <div ref={mapElement} className="map" tabIndex={0}
+        aria-label={isTracking ? `YJFC ${mode} map` : 'Airport destinations map. Use plus and minus to zoom.'} />
       <header className="hud destinations-hud">
         <div>
-          <div className="eyebrow">YJFC DESTINATIONS</div>
-          <div className="title">From KPDK</div>
+          <div className="eyebrow">{mode === 'destinations' ? 'YJFC DESTINATIONS' : 'YJFC AIR TRAFFIC'}</div>
+          <div className="title">{!isTracking ? 'From KPDK' : mode === 'destinations' ? 'Across the USA'
+            : mode === 'home' ? 'KPDK · 5 NM' : `${tracking.focus?.r} · 10 NM`}</div>
+          {isTracking && <div className="destinations-subtitle">{tracking.status}
+            {mode === 'follow' && ' · Switching aircraft every 15 seconds'}</div>}
         </div>
         <div className="destinations-summary">
-          <strong>{visits.length}</strong> airports visited
+          <strong>{mode === 'destinations' ? Math.max(0,visits.length - 1) : tracking.aircraft.length}</strong>
+          {mode === 'destinations' ? 'airports visited' : 'YJFC aircraft on ADS-B'}
         </div>
       </header>
 
-      <aside className="destinations-legend">
+      {mode === 'destinations' && <aside className="destinations-legend">
         <div><span className="legend-line recent" /> Visited in the last 30 days</div>
         <div><span className="legend-line older" /> Earlier visits</div>
-      </aside>
+      </aside>}
 
-      {selected && <aside className="destinations-tooltip" role="tooltip" style={tooltipPosition}>
+      {mode === 'destinations' && selected && <aside className="destinations-tooltip" role="tooltip" style={tooltipPosition}>
         <strong>{selected.icao || selected.siteId || 'Airport'}</strong>
         <span>{selected.icao?.toUpperCase() === HOME.icao ? 'Home base' : `${selected.visitCount} ${selected.visitCount === 1 ? 'visit' : 'visits'}`}</span>
         {selected.lastVisitedAt && <span>Last seen {formatVisitDate(selected.lastVisitedAt)}</span>}
