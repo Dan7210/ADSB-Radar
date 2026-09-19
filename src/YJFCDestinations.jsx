@@ -313,7 +313,7 @@ export default function YJFCDestinations({ tracking }) {
       {mode === 'destinations' && selected && <aside className="destinations-tooltip" role="tooltip" style={tooltipPosition}>
         <strong>{selected.icao || selected.siteId || 'Airport'}</strong>
         <span>{selected.icao?.toUpperCase() === HOME.icao ? 'Home base' : `${selected.visitCount} ${selected.visitCount === 1 ? 'visit' : 'visits'}`}</span>
-        {selected.lastVisitedAt && <span>Last seen {formatVisitDate(selected.lastVisitedAt)}</span>}
+        {selected.icao?.toUpperCase() !== HOME.icao && selected.lastVisitedAt && <span>Last seen {formatVisitDate(selected.lastVisitedAt)}</span>}
       </aside>}
 
       <footer className="footer destinations-footer">
