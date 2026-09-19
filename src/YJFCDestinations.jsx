@@ -234,13 +234,14 @@ export default function YJFCDestinations({ tracking }) {
 
   useEffect(() => {
     const homeVisit = visits.find((visit) => visit.icao?.toUpperCase() === HOME.icao);
-    const maxVisitCount = visits.reduce((max, visit) => Math.max(max, visit.visitCount), 1);
+    const maxVisitCount = visits.reduce((max, visit) =>
+      visit.icao?.toUpperCase() === HOME.icao ? max : Math.max(max, visit.visitCount), 1);
     const cutoff = Date.now() - THIRTY_DAYS_MS;
     const home = homeVisit || { ...HOME, siteId: 'KPDK', visitCount: 0 };
     const homePoint = fromLonLat([HOME.lon, HOME.lat]);
     const lines = [];
     const dots = [new Feature({ geometry: new Point(homePoint), visit: home, home: true,
-      radius: dotRadius(home.visitCount, maxVisitCount) })];
+      radius: MAX_DOT_RADIUS_PX })];
 
     for (const visit of visits) {
       if (visit.icao?.toUpperCase() === HOME.icao) continue;
