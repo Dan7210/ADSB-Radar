@@ -4,17 +4,17 @@ export const TAILS = ['N885GT', 'N161GT', 'N314GT', 'N98714', 'N2247T'];
 export const API = 'https://adsb-radar.duckdns.org:8443/api';
 export const NM = 1852;
 export function activeAircraft(payload, now = Date.now()) {
-  const age = Math.max(0, (now - Date.parse(payload.fetchedAt)) / 1000);
-  if (!Number.isFinite(age)) return [];
+  const maxAge = Math.min(120, Math.max(30, Number(payload.positionMaxAgeSecs) || 30));
   const byTail = new Map();
   for (const row of payload.ac || []) {
+    const age = Math.max(0, (now - Date.parse(row.fetchedAt ?? payload.fetchedAt)) / 1000);
     const tail = String(row.r || '').trim().toUpperCase();
     const seen = Number(row.seen_pos);
     if (!TAILS.includes(tail) || row.lat == null || row.lon == null ||
         String(row.lat).trim() === '' || String(row.lon).trim() === '' ||
         !Number.isFinite(Number(row.lat)) || !Number.isFinite(Number(row.lon)) ||
         Math.abs(Number(row.lat)) > 90 || Math.abs(Number(row.lon)) > 180 ||
-        row.seen_pos == null || !Number.isFinite(seen) || seen < 0 || seen + age > 30) continue;
+        !Number.isFinite(age) || row.seen_pos == null || !Number.isFinite(seen) || seen < 0 || seen + age > maxAge) continue;
     // Fresh ADS-B positions count, including parked aircraft and slow flight.
     const aircraft = { ...row, r: tail, lat: Number(row.lat), lon: Number(row.lon) };
     if (!byTail.has(tail) || seen < Number(byTail.get(tail).seen_pos)) byTail.set(tail, aircraft);

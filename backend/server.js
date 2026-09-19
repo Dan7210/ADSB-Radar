@@ -19,7 +19,8 @@ const ATLANTA_LON = '-84.3880';
 const RADIUS_NMI = '100';
 const TARGET_URL = `https://api.adsb.lol/v2/point/${ATLANTA_LAT}/${ATLANTA_LON}/${RADIUS_NMI}`;
 
-const POLL_INTERVAL_MS = 15000;
+const UPSTREAM_INTERVAL_MS = 11000;
+const POSITION_MAX_AGE_SECS = 120;
 const TRACKED_TAILS = ['N885GT', 'N161GT', 'N314GT', 'N98714', 'N2247T'];
 const airports = loadAirports();
 let airportVisits = loadVisits();
@@ -28,33 +29,58 @@ let visitStateDirty = false;
 let visitPollInProgress = false;
 let cachedAdsbData = null;
 let lastFetchError = null;
-let cachedYjfcData = null;
-let yjfcPollInProgress = false;
-let areaPollInProgress = false;
+const tailCache = new Map();
+const tailErrors = new Map();
 let lastAreaRequestAt = 0;
+let upstreamCooldownUntil = 0;
+let nextSlot = 0;
 
-// Background Poller
-async function pollAdsbLol() {
-  if (areaPollInProgress || Date.now() - lastAreaRequestAt > 60000) return;
-  areaPollInProgress = true;
+// One scheduler owns every adsb.lol request. Routes only read caches.
+async function pollUpstream() {
   try {
-    const response = await fetch(TARGET_URL, { signal: AbortSignal.timeout(12000) });
-    if (!response.ok) {
-      throw new Error(`Upstream returned status ${response.status}`);
+    if (Date.now() < upstreamCooldownUntil) return;
+    const slots = [...TRACKED_TAILS, 'area'];
+    let target = slots[nextSlot];
+    nextSlot = (nextSlot + 1) % slots.length;
+    if (target === 'area' && Date.now() - lastAreaRequestAt > 60000) {
+      target = slots[nextSlot];
+      nextSlot = (nextSlot + 1) % slots.length;
     }
-    cachedAdsbData = await response.json();
-    lastFetchError = null;
-    console.log(`[adsb.lol] Successfully updated cache for Atlanta, GA (100 nmi radius)`);
-  } catch (err) {
-    console.error(`[adsb.lol] Poll failed: ${err.message}`);
-    lastFetchError = err.message;
+    const fetchedAt = new Date().toISOString();
+    try {
+      const response = await fetch(target === 'area' ? TARGET_URL :
+        `https://api.adsb.lol/v2/reg/${target}`, { signal: AbortSignal.timeout(12000) });
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('retry-after');
+        const seconds = retryAfter === null ? NaN : Number(retryAfter);
+        const retryAt = Number.isFinite(seconds) ? Date.now() + seconds * 1000 : Date.parse(retryAfter);
+        upstreamCooldownUntil = Math.max(Date.now() + 60000, Number.isFinite(retryAt) ? retryAt : 0);
+      }
+      if (!response.ok) throw new Error(`Upstream returned ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data.ac)) throw new Error('Invalid upstream aircraft data');
+      if (target === 'area') {
+        cachedAdsbData = data;
+        lastFetchError = null;
+      } else {
+        const aircraft = data.ac.filter(a => !a.r || String(a.r).trim().toUpperCase() === target)
+          .map(a => ({ ...a, r: target, fetchedAt }));
+        // Publish each tail immediately, including successful empty results.
+        tailCache.set(target, { fetchedAt, aircraft });
+        tailErrors.delete(target);
+        await pollAirportVisits([{ status: 'fulfilled', value: { tail: target, aircraft } }]);
+      }
+    } catch (error) {
+      if (target === 'area') lastFetchError = error.message;
+      else tailErrors.set(target, error.message);
+      console.error(`[adsb.lol] ${target}: ${error.message}`);
+      // Preserve the last successful value and its original timestamp.
+    }
   } finally {
-    areaPollInProgress = false;
+    // Schedule after completion: no overlap, bursts, or accumulating queue.
+    setTimeout(pollUpstream, UPSTREAM_INTERVAL_MS);
   }
 }
-
-// Start polling
-setInterval(pollAdsbLol, POLL_INTERVAL_MS);
 
 // Query registrations globally; the Atlanta point feed cannot see visits elsewhere.
 function sameVisitState(left, right) {
@@ -123,34 +149,7 @@ async function pollAirportVisits(results) {
   }
 }
 
-// One global registration lookup per tail per cycle, shared by the map and visit tracking.
-async function pollYjfc() {
-  if (yjfcPollInProgress) return;
-  yjfcPollInProgress = true;
-  const fetchedAt = new Date().toISOString();
-  try {
-    const results = await Promise.allSettled(TRACKED_TAILS.map(async tail => {
-      const response = await fetch(`https://api.adsb.lol/v2/reg/${tail}`, {
-        signal: AbortSignal.timeout(12000),
-      });
-      if (!response.ok) throw new Error(`${tail}: upstream returned ${response.status}`);
-      const data = await response.json();
-      if (!Array.isArray(data.ac)) throw new Error(`${tail}: invalid aircraft data`);
-      return { tail, aircraft: data.ac.filter(a => !a.r || String(a.r).trim().toUpperCase() === tail)
-        .map(a => ({ ...a, r: tail })) };
-    }));
-    // Failed lookups are omitted, never re-stamped as fresh aircraft.
-    cachedYjfcData = { fetchedAt,
-      ac: results.flatMap(result => result.status === 'fulfilled' ? result.value.aircraft : []),
-      errors: results.filter(result => result.status === 'rejected').map(result => result.reason.message),
-    };
-    await pollAirportVisits(results);
-  } finally {
-    yjfcPollInProgress = false;
-  }
-}
-pollYjfc();
-setInterval(pollYjfc, POLL_INTERVAL_MS);
+pollUpstream();
 
 // Enable CORS
 app.use(cors());
@@ -196,7 +195,6 @@ app.get('/api/aircraft', clientLimiter, (req, res) => {
 app.get('/api/adsb-lol', clientLimiter, (req, res) => {
   // The general radar still needs an area feed. YJFC-only use never starts it.
   lastAreaRequestAt = Date.now();
-  if (!cachedAdsbData) void pollAdsbLol();
   if (!cachedAdsbData) {
     return res.status(503).json({
       error: 'adsb.lol cache warming up',
@@ -211,11 +209,14 @@ app.get('/api/adsb-lol', clientLimiter, (req, res) => {
 
 app.get('/api/yjfc-aircraft', clientLimiter, (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  if (!cachedYjfcData) return res.status(503).json({ error: 'YJFC cache warming up' });
-  if (cachedYjfcData.errors.length === TRACKED_TAILS.length) {
-    return res.status(503).json({ error: 'All YJFC lookups failed' });
-  }
-  res.json(cachedYjfcData);
+  const entries = [...tailCache.values()];
+  res.json({
+    fetchedAt: entries.map(entry => entry.fetchedAt).sort().at(-1) || null,
+    ac: entries.flatMap(entry => entry.aircraft),
+    positionMaxAgeSecs: POSITION_MAX_AGE_SECS,
+    pendingTails: TRACKED_TAILS.filter(tail => !tailCache.has(tail)),
+    errors: [...tailErrors].map(([tail, error]) => `${tail}: ${error}`),
+  });
 });
 
 app.get('/api/airport-visits', clientLimiter, (req, res) => {

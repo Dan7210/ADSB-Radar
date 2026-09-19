@@ -22,8 +22,8 @@ export default function YJFCMap() {
         });
         if (!response.ok) throw new Error(`YJFC feed unavailable (${response.status})`);
         const data = await response.json();
-        if (!Array.isArray(data.ac) || !Number.isFinite(Date.parse(data.fetchedAt))) throw new Error('Invalid YJFC feed');
-        if (active) { setFeed(data); setError(data.errors?.length ? 'Some tail lookups failed' : ''); }
+        if (!Array.isArray(data.ac) || (data.fetchedAt !== null && !Number.isFinite(Date.parse(data.fetchedAt)))) throw new Error('Invalid YJFC feed');
+        if (active) { setFeed(data); setError(''); }
       } catch (failure) {
         if (active) setError(failure.message);
       } finally {
@@ -47,6 +47,7 @@ export default function YJFCMap() {
     return () => clearInterval(timer);
   }, [mode, tailKey]);
   return <YJFCDestinations tracking={{ mode, aircraft, focus,
-    status: error || (!feed.fetchedAt ? 'Connecting to YJFC feed…' :
-      now - Date.parse(feed.fetchedAt) > 30000 ? 'Aircraft feed stale' : 'Live ADS-B') }} />;
+    status: error || (feed.errors?.length ? 'ADS-B refresh delayed · retrying automatically' :
+      !feed.fetchedAt || feed.pendingTails?.length ? 'Loading aircraft cache…' :
+      now - Date.parse(feed.fetchedAt) > 120000 ? 'Aircraft feed stale' : 'ADS-B · cached positions') }} />;
 }
