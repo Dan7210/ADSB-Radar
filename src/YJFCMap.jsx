@@ -5,7 +5,7 @@ import { activeAircraft, API, viewMode } from './yjfcTracking.js';
 export default function YJFCMap() {
   const [feed, setFeed] = useState({ ac: [] });
   const [now, setNow] = useState(Date.now);
-  const [error, setError] = useState('');
+  const [, setError] = useState('');
   const [focusedTail, setFocusedTail] = useState(null);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -46,8 +46,5 @@ export default function YJFCMap() {
     }), 15000);
     return () => clearInterval(timer);
   }, [mode, tailKey]);
-  return <YJFCDestinations tracking={{ mode, aircraft, focus,
-    status: error || (feed.errors?.length ? 'ADS-B refresh delayed · retrying automatically' :
-      !feed.fetchedAt || feed.pendingTails?.length ? 'Loading aircraft cache…' :
-      now - Date.parse(feed.fetchedAt) > 120000 ? 'Aircraft feed stale' : 'ADS-B · cached positions') }} />;
+  return <YJFCDestinations tracking={{ mode, aircraft, focus, status: ''}} />;
 }

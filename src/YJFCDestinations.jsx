@@ -26,6 +26,12 @@ const EARTH_RADIUS_NM = 3440.065;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const GOLD = '#ffbd52';
 const OLD_COLOR = 'rgba(255,255,255,0.5)';
+// Airport dot radius clamps, in pixels.
+const MIN_DOT_RADIUS_PX = 8;
+const MAX_DOT_RADIUS_PX = 15;
+// Compact dots and a southern-US overview for the automatic #/YJFC map.
+const YJFC_DOT_RADIUS_PX = 6;
+const YJFC_DESTINATION_EXTENT = [-110, 26, -75, 40]; // west, south, east, north
 
 function radiusBoundary(center = HOME, radius = RADIUS_NM) {
   const latitude = center.lat * Math.PI / 180;
@@ -62,8 +68,11 @@ function normalizeVisits(raw) {
   }));
 }
 
-function dotRadius(count) {
-  return Math.min(15, 5 + 2.5 * Math.sqrt(Math.max(0, count - 1)));
+function dotRadius(count, maxCount) {
+  const ratio = Math.max(0, Math.min(1, count / Math.max(1, maxCount)));
+  // Scale area by relative visit count, then clamp the radius for readability.
+  return Math.max(MIN_DOT_RADIUS_PX, Math.min(MAX_DOT_RADIUS_PX,
+    MAX_DOT_RADIUS_PX * Math.sqrt(ratio)));
 }
 
 function formatVisitDate(value) {
@@ -101,17 +110,17 @@ export default function YJFCDestinations({ tracking }) {
     const dotLayer = new VectorLayer({
       source: dotsRef.current,
       style: (feature) => {
-        const visit = feature.get('visit');
+        const radius = isTracking ? YJFC_DOT_RADIUS_PX : feature.get('radius');
         const home = feature.get('home');
         return new Style({
           image: new CircleStyle({
-            radius: home ? Math.max(8, dotRadius(visit.visitCount)) : dotRadius(visit.visitCount),
+            radius,
             fill: new Fill({ color: home || feature.get('recent') ? GOLD : '#e3eaf2' }),
             stroke: new Stroke({ color: '#07111f', width: 2 }),
           }),
           text: home ? new Text({
             text: 'KPDK',
-            offsetY: -19,
+            offsetY: -(radius + 10),
             font: '700 11px "JetBrains Mono", monospace',
             fill: new Fill({ color: GOLD }),
             stroke: new Stroke({ color: '#07111f', width: 3 }),
@@ -225,11 +234,13 @@ export default function YJFCDestinations({ tracking }) {
 
   useEffect(() => {
     const homeVisit = visits.find((visit) => visit.icao?.toUpperCase() === HOME.icao);
+    const maxVisitCount = visits.reduce((max, visit) => Math.max(max, visit.visitCount), 1);
     const cutoff = Date.now() - THIRTY_DAYS_MS;
     const home = homeVisit || { ...HOME, siteId: 'KPDK', visitCount: 0 };
     const homePoint = fromLonLat([HOME.lon, HOME.lat]);
     const lines = [];
-    const dots = [new Feature({ geometry: new Point(homePoint), visit: home, home: true })];
+    const dots = [new Feature({ geometry: new Point(homePoint), visit: home, home: true,
+      radius: dotRadius(home.visitCount, maxVisitCount) })];
 
     for (const visit of visits) {
       if (visit.icao?.toUpperCase() === HOME.icao) continue;
@@ -242,6 +253,7 @@ export default function YJFCDestinations({ tracking }) {
       dots.push(new Feature({
         geometry: new Point(destination),
         visit,
+        radius: dotRadius(visit.visitCount, maxVisitCount),
         recent,
       }));
     }
@@ -266,7 +278,7 @@ export default function YJFCDestinations({ tracking }) {
     aircraftLayer.setVisible(!idle);
     const center = mode === 'follow' ? { lon: focusLon, lat: focusLat } : HOME;
     const radius = mode === 'follow' ? 10 : 5;
-    const extent = idle ? transformExtent([-125, 24, -66, 50], 'EPSG:4326', 'EPSG:3857')
+    const extent = idle ? transformExtent(YJFC_DESTINATION_EXTENT, 'EPSG:4326', 'EPSG:3857')
       : radiusBoundary(center, radius).getExtent();
     ringsSource.current.clear(true);
     if (!idle) ringsSource.current.addFeatures(Array.from({ length: 5 }, (_, index) =>
@@ -294,7 +306,7 @@ export default function YJFCDestinations({ tracking }) {
       <header className="hud destinations-hud">
         <div>
           <div className="eyebrow">{mode === 'destinations' ? 'YJFC DESTINATIONS' : 'YJFC AIR TRAFFIC'}</div>
-          <div className="title">{!isTracking ? 'From KPDK' : mode === 'destinations' ? 'Across the USA'
+          <div className="title">{!isTracking ? 'From KPDK' : mode === 'destinations' ? 'From KPDK'
             : mode === 'home' ? 'KPDK · 5 NM' : `${tracking.focus?.r} · 10 NM`}</div>
           {isTracking && <div className="destinations-subtitle">{tracking.status}
             {mode === 'follow' && ' · Switching aircraft every 15 seconds'}</div>}
