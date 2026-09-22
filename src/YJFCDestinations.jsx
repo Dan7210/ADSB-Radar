@@ -278,7 +278,7 @@ export default function YJFCDestinations({ tracking }) {
     ringLayer.setVisible(!idle);
     aircraftLayer.setVisible(!idle);
     const center = mode === 'follow' ? { lon: focusLon, lat: focusLat } : HOME;
-    const radius = mode === 'follow' ? 10 : 5;
+    const radius = mode === 'follow' ? 5 : 5;
     const extent = idle ? transformExtent(YJFC_DESTINATION_EXTENT, 'EPSG:4326', 'EPSG:3857')
       : radiusBoundary(center, radius).getExtent();
     ringsSource.current.clear(true);
@@ -296,9 +296,9 @@ export default function YJFCDestinations({ tracking }) {
 
   useEffect(() => {
     aircraftSource.current.clear(true);
-    aircraftSource.current.addFeatures((tracking?.aircraft || []).map(a =>
+    aircraftSource.current.addFeatures((tracking?.visibleAircraft || tracking?.aircraft || []).map(a =>
       new Feature({ geometry: new Point(fromLonLat([a.lon, a.lat])), aircraft: a })));
-  }, [tracking?.aircraft]);
+  }, [tracking?.aircraft, tracking?.visibleAircraft]);
 
   return (
     <main className="radar destinations">
@@ -308,7 +308,7 @@ export default function YJFCDestinations({ tracking }) {
         <div>
           <div className="eyebrow">{mode === 'destinations' ? 'YJFC DESTINATIONS' : 'YJFC AIR TRAFFIC'}</div>
           <div className="title">{!isTracking ? 'From KPDK' : mode === 'destinations' ? 'From KPDK'
-            : mode === 'home' ? 'KPDK · 5 NM' : `${tracking.focus?.r} · 10 NM`}</div>
+            : mode === 'home' ? 'KPDK · 5 NM' : `${tracking.focus?.r} · 5 NM`}</div>
           {isTracking && <div className="destinations-subtitle">{tracking.status}
             {mode === 'follow' && ' · Switching aircraft every 15 seconds'}</div>}
         </div>

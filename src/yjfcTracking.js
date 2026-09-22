@@ -15,7 +15,6 @@ export function activeAircraft(payload, now = Date.now()) {
         !Number.isFinite(Number(row.lat)) || !Number.isFinite(Number(row.lon)) ||
         Math.abs(Number(row.lat)) > 90 || Math.abs(Number(row.lon)) > 180 ||
         !Number.isFinite(age) || row.seen_pos == null || !Number.isFinite(seen) || seen < 0 || seen + age > maxAge) continue;
-    // Fresh ADS-B positions count, including parked aircraft and slow flight.
     const aircraft = { ...row, r: tail, lat: Number(row.lat), lon: Number(row.lon) };
     if (!byTail.has(tail) || seen < Number(byTail.get(tail).seen_pos)) byTail.set(tail, aircraft);
   }
