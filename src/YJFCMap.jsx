@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getDistance } from 'ol/sphere.js';
 import YJFCDestinations from './YJFCDestinations.jsx';
+import { estimatedLonLat } from './aircraftMotion.js';
 import { activeAircraft, API, NM, viewMode } from './yjfcTracking.js';
 
 export default function YJFCMap() {
@@ -38,8 +39,9 @@ export default function YJFCMap() {
   const mode = viewMode(aircraft);
   const tailKey = aircraft.map(a => a.r).join(',');
   const focus = aircraft.find(a => a.r === focusedTail) || aircraft[0];
+  const focusPosition = focus && estimatedLonLat(focus);
   const visibleAircraft = mode === 'follow' && focus
-    ? aircraft.filter(a => getDistance([focus.lon, focus.lat], [a.lon, a.lat]) <= 5 * NM)
+    ? aircraft.filter(a => getDistance(focusPosition, estimatedLonLat(a)) <= 5 * NM)
     : aircraft;
   useEffect(() => {
     if (mode !== 'follow') return;

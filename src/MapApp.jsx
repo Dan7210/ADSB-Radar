@@ -14,6 +14,7 @@ import Fill from 'ol/style/Fill.js';
 import CircleStyle from 'ol/style/Circle.js';
 import Text from 'ol/style/Text.js';
 import { apply } from 'ol-mapbox-style';
+import { stepMotion, updateMotion } from './aircraftMotion.js';
 import 'ol/ol.css';
 import './style.css';
 
@@ -75,10 +76,13 @@ function parseType(raw) {
 
 function normalizeAircraft(raw, nowSecs) {
   const list = Array.isArray(raw) ? raw : (raw.aircraft || raw.ac || []);
+  const snapshotTime = Number(raw?.now);
+  const snapshotAge = Number.isFinite(snapshotTime) ? Math.max(0, nowSecs - snapshotTime) : 0;
   return list.map(a => {
     let seen = Number(a.seen_pos ?? a.seen ?? 0);
-    
+    let seenIsTimestamp = false;
     if (seen > 1000000000) {
+      seenIsTimestamp = true;
       seen = Math.max(0, nowSecs - seen);
     }
 
@@ -113,7 +117,8 @@ function normalizeAircraft(raw, nowSecs) {
       type: parseType(a),
       altitude: altVal,
       isMilitary,
-      seen
+      seen,
+      positionAge: seen + (seenIsTimestamp ? 0 : snapshotAge),
     };
   }).filter(a => Number.isFinite(a.lat) && Number.isFinite(a.lon));
 }
@@ -147,6 +152,7 @@ export function Radar({ cfg }) {
   const ringLayerRef = useRef(null);
   const hoveredFeatureRef = useRef(null);
   const selectedFeatureRef = useRef(null);
+  const animationFrameRef = useRef(null);
 
   const [localAircraftMap, setLocalAircraftMap] = useState(new Map());
   const [aggregatorAircraftMap, setAggregatorAircraftMap] = useState(new Map());
@@ -224,6 +230,22 @@ export function Radar({ cfg }) {
       ringSourceRef.current.clear();
     };
   }, [cfg.center]);
+
+  useEffect(() => {
+    const animate = frameTime => {
+      for (const feature of aircraftFeaturesRef.current.values()) {
+        feature.getGeometry().setCoordinates(stepMotion(feature.get('motion'), frameTime));
+      }
+      mapRef.current?.render();
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -497,6 +519,7 @@ export function Radar({ cfg }) {
     const source = aircraftSourceRef.current;
     const featureMap = aircraftFeaturesRef.current;
     const currentIds = new Set();
+    const frameTime = performance.now();
 
     for (const a of aircraft) {
       currentIds.add(a.id);
@@ -504,18 +527,17 @@ export function Radar({ cfg }) {
       let feature = featureMap.get(a.id);
 
       if (!feature) {
+        const motion = updateMotion(null, a, frameTime);
         feature = new Feature({
-          geometry: new Point(fromLonLat([a.lon, a.lat])),
-          aircraft: a
+          geometry: new Point(motion.rendered),
+          aircraft: a,
+          motion,
         });
 
         featureMap.set(a.id, feature);
         source.addFeature(feature);
       } else {
-        feature.getGeometry().setCoordinates(
-          fromLonLat([a.lon, a.lat])
-        );
-
+        updateMotion(feature.get('motion'), a, frameTime);
         feature.set('aircraft', a);
       }
     }

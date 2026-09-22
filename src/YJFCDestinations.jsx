@@ -7,7 +7,7 @@ import VectorSource from 'ol/source/Vector.js';
 import Feature from 'ol/Feature.js';
 import Point from 'ol/geom/Point.js';
 import LineString from 'ol/geom/LineString.js';
-import { fromLonLat, transformExtent } from 'ol/proj.js';
+import { fromLonLat, toLonLat, transformExtent } from 'ol/proj.js';
 import { offset } from 'ol/sphere.js';
 import { NM } from './yjfcTracking.js';
 import Style from 'ol/style/Style.js';
@@ -16,6 +16,7 @@ import Fill from 'ol/style/Fill.js';
 import CircleStyle from 'ol/style/Circle.js';
 import Text from 'ol/style/Text.js';
 import { apply } from 'ol-mapbox-style';
+import { estimatedLonLat, stepMotion, updateMotion } from './aircraftMotion.js';
 import 'ol/ol.css';
 import './style.css';
 
@@ -84,6 +85,10 @@ export default function YJFCDestinations({ tracking }) {
   const mode = tracking?.mode || 'destinations';
   const isTracking = Boolean(tracking);
   const aircraftSource = useRef(new VectorSource());
+  const aircraftFeatures = useRef(new Map());
+  const focusAircraft = useRef(null);
+  const animationFrame = useRef(null);
+  const ringCenter = useRef(null);
   const ringsSource = useRef(new VectorSource());
   const layersRef = useRef(null);
   const mapElement = useRef(null);
@@ -96,6 +101,12 @@ export default function YJFCDestinations({ tracking }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    focusAircraft.current = tracking?.focus || null;
+  }, [tracking?.focus]);
+
+  useEffect(() => {
+    const featureMap = aircraftFeatures.current;
+    const aircraftVectorSource = aircraftSource.current;
     const boundary = radiusBoundary();
     const lineLayer = new VectorLayer({
       source: linesRef.current,
@@ -134,7 +145,8 @@ export default function YJFCDestinations({ tracking }) {
     }) });
     const aircraftLayer = new VectorLayer({ source: aircraftSource.current, style: feature => {
       const a = feature.get('aircraft');
-      const point = [a.lon, a.lat];
+      const position = feature.getGeometry().getCoordinates();
+      const point = toLonLat(position);
       const behind = offset(point, Math.max(0.2, Number(a.gs || 0) / 120) * NM,
         (Number(a.track || 0) + 180) * Math.PI / 180);
       return [new Style({
@@ -143,7 +155,7 @@ export default function YJFCDestinations({ tracking }) {
         text: new Text({ text: `${a.r}\n${a.alt_baro === 'ground' ? 'SFC' : a.alt_baro != null ? a.alt_baro + ' FT' : 'ALT —'} · ${a.gs ?? '—'} KT`,
           offsetY: -25, font: '600 11px "JetBrains Mono", monospace',
           fill: new Fill({ color: GOLD }), stroke: new Stroke({ color: '#07111f', width: 3 }) }),
-      }), new Style({ geometry: new LineString([fromLonLat(behind), fromLonLat(point)]),
+      }), new Style({ geometry: new LineString([fromLonLat(behind), position]),
         stroke: new Stroke({ color: GOLD, width: 1.5, lineDash: [2, 7] }) })];
     } });
     layersRef.current = { lineLayer, dotLayer, ringLayer, aircraftLayer };
@@ -202,8 +214,42 @@ export default function YJFCDestinations({ tracking }) {
       map.un('pointermove', handlePointerMove);
       map.setTarget(undefined);
       mapRef.current = null;
+      featureMap.clear();
+      aircraftVectorSource.clear();
     };
   }, [isTracking]);
+
+  useEffect(() => {
+    if (!isTracking) return;
+    const animate = frameTime => {
+      for (const feature of aircraftFeatures.current.values()) {
+        feature.getGeometry().setCoordinates(stepMotion(feature.get('motion'), frameTime));
+      }
+
+      if (mode === 'follow') {
+        const focusFeature = aircraftFeatures.current.get(tracking?.focus?.r);
+        const center = focusFeature?.getGeometry().getCoordinates();
+        if (center && mapRef.current) {
+          mapRef.current.getView().setCenter(center);
+          if (ringCenter.current) {
+            const dx = center[0] - ringCenter.current[0];
+            const dy = center[1] - ringCenter.current[1];
+            for (const ring of ringsSource.current.getFeatures()) ring.getGeometry().translate(dx, dy);
+          }
+          ringCenter.current = [...center];
+        }
+      }
+
+      mapRef.current?.render();
+      animationFrame.current = requestAnimationFrame(animate);
+    };
+
+    animationFrame.current = requestAnimationFrame(animate);
+    return () => {
+      if (animationFrame.current !== null) cancelAnimationFrame(animationFrame.current);
+      animationFrame.current = null;
+    };
+  }, [isTracking, mode, tracking?.focus?.r]);
 
   useEffect(() => {
     let active = true;
@@ -266,8 +312,7 @@ export default function YJFCDestinations({ tracking }) {
     mapRef.current?.render();
   }, [visits]);
 
-  const focusLon = mode === 'follow' ? tracking?.focus?.lon : undefined;
-  const focusLat = mode === 'follow' ? tracking?.focus?.lat : undefined;
+  const focusTail = mode === 'follow' ? tracking?.focus?.r : undefined;
   useEffect(() => {
     if (!isTracking || !mapRef.current) return;
     const map = mapRef.current;
@@ -277,13 +322,19 @@ export default function YJFCDestinations({ tracking }) {
     dotLayer.setVisible(idle);
     ringLayer.setVisible(!idle);
     aircraftLayer.setVisible(!idle);
-    const center = mode === 'follow' ? { lon: focusLon, lat: focusLat } : HOME;
+    const focusCoordinates = aircraftFeatures.current.get(focusTail)?.getGeometry().getCoordinates();
+    const focusPosition = mode === 'follow'
+      ? focusCoordinates ? toLonLat(focusCoordinates)
+        : focusAircraft.current ? estimatedLonLat(focusAircraft.current) : null
+      : null;
+    const center = focusPosition ? { lon: focusPosition[0], lat: focusPosition[1] } : HOME;
     const radius = mode === 'follow' ? 5 : 5;
     const extent = idle ? transformExtent(YJFC_DESTINATION_EXTENT, 'EPSG:4326', 'EPSG:3857')
       : radiusBoundary(center, radius).getExtent();
     ringsSource.current.clear(true);
     if (!idle) ringsSource.current.addFeatures(Array.from({ length: 5 }, (_, index) =>
       new Feature({ geometry: radiusBoundary(center, radius * (index + 1) / 5) })));
+    ringCenter.current = !idle ? fromLonLat([center.lon, center.lat]) : null;
     const fit = () => {
       map.updateSize();
       map.getView().fit(extent, { padding: [80, 35, 80, 35], duration: 0 });
@@ -292,12 +343,31 @@ export default function YJFCDestinations({ tracking }) {
     const observer = new ResizeObserver(fit);
     observer.observe(mapElement.current);
     return () => observer.disconnect();
-  }, [isTracking, mode, focusLon, focusLat]);
+  }, [isTracking, mode, focusTail]);
 
   useEffect(() => {
-    aircraftSource.current.clear(true);
-    aircraftSource.current.addFeatures((tracking?.visibleAircraft || tracking?.aircraft || []).map(a =>
-      new Feature({ geometry: new Point(fromLonLat([a.lon, a.lat])), aircraft: a })));
+    const source = aircraftSource.current;
+    const currentIds = new Set();
+    const frameTime = performance.now();
+    for (const aircraft of tracking?.visibleAircraft || tracking?.aircraft || []) {
+      currentIds.add(aircraft.r);
+      let feature = aircraftFeatures.current.get(aircraft.r);
+      if (!feature) {
+        const motion = updateMotion(null, aircraft, frameTime);
+        feature = new Feature({ geometry: new Point(motion.rendered), aircraft, motion });
+        aircraftFeatures.current.set(aircraft.r, feature);
+        source.addFeature(feature);
+      } else {
+        updateMotion(feature.get('motion'), aircraft, frameTime);
+        feature.set('aircraft', aircraft);
+      }
+    }
+    for (const [id, feature] of aircraftFeatures.current) {
+      if (!currentIds.has(id)) {
+        source.removeFeature(feature);
+        aircraftFeatures.current.delete(id);
+      }
+    }
   }, [tracking?.aircraft, tracking?.visibleAircraft]);
 
   return (
