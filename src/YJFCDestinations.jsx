@@ -328,7 +328,7 @@ export default function YJFCDestinations({ tracking }) {
         : focusAircraft.current ? estimatedLonLat(focusAircraft.current) : null
       : null;
     const center = focusPosition ? { lon: focusPosition[0], lat: focusPosition[1] } : HOME;
-    const radius = mode === 'follow' ? 5 : 5;
+    const radius = mode === 'follow' ? 5 : 2.5;
     const extent = idle ? transformExtent(YJFC_DESTINATION_EXTENT, 'EPSG:4326', 'EPSG:3857')
       : radiusBoundary(center, radius).getExtent();
     ringsSource.current.clear(true);
@@ -378,7 +378,7 @@ export default function YJFCDestinations({ tracking }) {
         <div>
           <div className="eyebrow">{mode === 'destinations' ? 'YJFC DESTINATIONS' : 'YJFC AIR TRAFFIC'}</div>
           <div className="title">{!isTracking ? 'From KPDK' : mode === 'destinations' ? 'From KPDK'
-            : mode === 'home' ? 'KPDK · 5 NM' : `${tracking.focus?.r} · 5 NM`}</div>
+            : mode === 'home' ? 'KPDK · 2.5 NM' : `${tracking.focus?.r} · 5 NM`}</div>
           {isTracking && <div className="destinations-subtitle">{tracking.status}
             {mode === 'follow' && ' · Switching aircraft every 15 seconds'}</div>}
         </div>
